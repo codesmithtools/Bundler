@@ -73,6 +73,7 @@ var fs = require("fs"),
     less = require('less'),
     sass = require('sass'),
     coffee = require('coffee-script'),
+    TypeScript = require('./typescript_module.js'),
     cleanCss = require('clean-css'),
     Step = require('step'),
     startedAt = Date.now();
@@ -105,7 +106,7 @@ var scanIndex = 0;
 (function scanNext() {
     if (scanIndex < SCAN_ROOT_DIRS.length) {
         var rootDir = SCAN_ROOT_DIRS[scanIndex++];
-        path.exists(rootDir, function(exists) {
+        fs.exists(rootDir, function(exists) {
             if (exists) {
                 walk(rootDir, function(err, allFiles) {
                     if (err) throw err;
@@ -158,7 +159,7 @@ function scanDir(allFiles, cb) {
                         var recursive = options.folder === 'recursive';
                         jsFiles = allFiles.map(function jsMatches(fileName) {
                             if (!fileName.startsWith(bundleDir)) return '#';
-                            if (!fileName.endsWithAny(['.js', '.coffee'])) return '#';
+                            if (!fileName.endsWithAny(['.js', '.coffee', '.ts'])) return '#';
                             if (fileName.endsWithAny(['.min.js'])) return '#';
                             if (!recursive && (path.dirname(fileName) !== bundleDir)) return '#';
                             return fileName.substring(bundleDir.length + 1);
@@ -253,6 +254,10 @@ function processJsBundle(options, jsBundle, bundleDir, jsFiles, bundleName, cb) 
                 ? file.replace(".coffee", ".js")
                 : file;
 
+        var isTypeScript = file.endsWith(".ts"), jsFile = isTypeScript
+                ? file.replace(".ts", ".js")
+                : file;
+
         var filePath = path.join(bundleDir, file),
                 jsPath = path.join(bundleDir, jsFile),
                 minJsPath = getMinFileName(jsPath);
@@ -264,7 +269,11 @@ function processJsBundle(options, jsBundle, bundleDir, jsFiles, bundleName, cb) 
                 var next = this;
                 if (isCoffee) {
                     readTextFile(filePath, function (coffee) {
-                        getOrCreateJs(options, coffee, filePath, jsPath, next);
+                        getOrCreateCoffeeJs(options, coffee, filePath, jsPath, next);
+                    });
+                } else if (isTypeScript) {
+                    readTextFile(filePath, function (typeScript) {
+                        getOrCreateTypeScriptJs(options, typeScript, filePath, jsPath, next);
                     });
                 } else {
                     readTextFile(jsPath, next);
@@ -375,10 +384,16 @@ function processCssBundle(options, cssBundle, bundleDir, cssFiles, bundleName, c
     });
 }
 
-function getOrCreateJs(options, coffeeScript, csPath, jsPath, cb /*cb(js)*/) {
+function getOrCreateCoffeeJs(options, coffeeScript, csPath, jsPath, cb /*cb(js)*/) {
     compileAsync(options, "compiling", function (coffeeScript, csPath, cb) {
             cb(coffee.compile(coffeeScript));
         }, coffeeScript, csPath, jsPath, cb);
+}
+
+function getOrCreateTypeScriptJs(options, typeScript, tsPath, jsPath, cb /*cb(js)*/) {
+    compileAsync(options, "compiling", function (coffeeScript, csPath, cb) {
+        cb(TypeScript.compile(typeScript, tsPath));
+    }, typeScript, tsPath, jsPath, cb);
 }
 
 function getOrCreateMinJs(options, js, jsPath, minJsPath, cb /*cb(minJs)*/) {
@@ -407,7 +422,7 @@ function compileAsync(options, mode, compileFn /*compileFn(text, textPath, cb(co
     text, textPath, compileTextPath, cb /*cb(compiledText)*/) {
     Step(
         function () {
-            path.exists(compileTextPath, this);
+            fs.exists(compileTextPath, this);
         },
         function (exists) {
             var next = this;
